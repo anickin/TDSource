@@ -1905,9 +1905,10 @@ async function moderateReview(request: Request, env: Env, documentId: string, ac
   if (!session?.appUserId) return json({ code: "UNAUTHENTICATED" }, 401);
   if (!hasReviewAccess(session.teamRoles)) return json({ code: "FORBIDDEN" }, 403);
   if (!(await authorizedDocumentIds(env, session, "review")).includes(documentId)) return json({ code: "NOT_FOUND" }, 404);
-  const body = request.headers.get("content-type")?.startsWith("application/json") ? await request.json() as { label?: unknown; organizationWide?: unknown } : {};
+  const body = request.headers.get("content-type")?.startsWith("application/json") ? await request.json() as { label?: unknown; organizationWide?: unknown; dataHandlingConfirmed?: unknown } : {};
   const label = action === "approve" && (body.label === "verified" || body.label === "unresolved") ? body.label : null;
   if (action === "approve" && !label) return json({ code: "LABEL_REQUIRED" }, 400);
+  if (action === "approve" && body.dataHandlingConfirmed !== true) return json({ code: "DATA_HANDLING_CONFIRMATION_REQUIRED", message: "Confirm the data-handling statement before publishing." }, 400);
   await supabaseRequest<void>(env, "rpc/moderate_document_with_visibility", { method: "POST", body: JSON.stringify({ p_document_id: documentId, p_user_id: session.appUserId, p_action: action, p_label: label, p_organization_wide: organizationWideFromReview(body.organizationWide) }) });
   if (action === "approve") await enqueueKnowledgeIndex(env, documentId);
   return json({ ok: true });
@@ -2105,7 +2106,7 @@ async function chatKnowledge(request: Request, env: Env): Promise<Response> {
   try {
     const output = await requestLlmJson({
       env,
-      systemPrompt: "Answer the current question using only the supplied published knowledge. Use earlier conversation only to understand references in the current question; earlier assistant statements are not authoritative. If the published knowledge does not answer the question, say so. Do not invent facts. Cite supporting source numbers in the citations array.",
+      systemPrompt: "Answer the current question using only the supplied published knowledge. Use earlier conversation only to understand references in the current question; earlier assistant statements are not authoritative. If the published knowledge does not answer the question, say so. Do not invent facts. Format the answer for professional readability with short paragraphs, descriptive Markdown headings when useful, and numbered or bulleted lists for steps or grouped items. Cite supporting source numbers in the citations array.",
       parts: [{ text: `Recent conversation:\n${buildConversationContext(history)}\n\nCurrent question:\n${sanitizedQuestion}\n\nPublished knowledge:\n${buildKnowledgeContext(ranked)}` }],
       schema: { type: "object", required: ["answer", "citations"], properties: { answer: { type: "string" }, citations: { type: "array", items: { type: "integer" } } } },
     });
@@ -2251,7 +2252,10 @@ async function submitSopReview(request: Request, env: Env): Promise<Response> {
   if (Number(request.headers.get("content-length")) > 4 * 1024 * 1024) return json({ code: "INVALID_SOP_SUBMISSION", message: "The SOP submission is too large." }, 400);
   let raw: unknown;
   try { raw = await request.json(); } catch { return json({ code: "INVALID_SOP_SUBMISSION", message: "The SOP submission was not valid JSON." }, 400); }
-  const payload = raw && typeof raw === "object" && "result" in raw ? (raw as { result: unknown }).result : raw;
+  if (!raw || typeof raw !== "object" || (raw as { dataHandlingConfirmed?: unknown }).dataHandlingConfirmed !== true) {
+    return json({ code: "DATA_HANDLING_CONFIRMATION_REQUIRED", message: "Confirm the data-handling statement before submitting the SOP." }, 400);
+  }
+  const payload = "result" in raw ? (raw as { result: unknown }).result : raw;
   let submission: ReturnType<typeof validateSopSubmission>;
   try { submission = validateSopSubmission(payload); } catch { return json({ code: "INVALID_SOP_SUBMISSION", message: "The generated SOP could not be validated." }, 400); }
   if (!session.teamRoles.some(({ teamId, role }) => teamId === submission.teamId && (role === "moderator" || role === "admin"))) {

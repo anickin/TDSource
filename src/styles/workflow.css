@@ -179,6 +179,8 @@
 .review-page .draft-editor :is(input, textarea, select) { min-height: 44px; padding: 10px 12px; border: 1px solid var(--tds-border, var(--line, #d9d8d7)); border-radius: var(--tds-radius, 2px); font-size: 1rem; line-height: 1.5; }
 .review-page .review-visibility { border-radius: var(--tds-radius, 2px); background: color-mix(in srgb, var(--tds-aqua, #08bed5) 8%, var(--tds-surface, #fff)); }
 .review-page .review-dialog footer > button { border-radius: var(--tds-radius, 2px); font-family: Arial, Helvetica, sans-serif; }
+.submission-confirmation { display: flex; flex: 1 0 100%; align-items: flex-start; gap: var(--tds-space-3, 12px); color: var(--ink); font-size: .875rem; line-height: 1.5; cursor: pointer; }
+.submission-confirmation input { width: 18px; height: 18px; flex: 0 0 auto; margin-top: 1px; accent-color: var(--tds-action, #005758); }
 
 /* Team settings and administration */
 .admin-setup-page .people-panel,

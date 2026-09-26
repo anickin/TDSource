@@ -12,7 +12,7 @@ interface PublishedDraft { title: string; problem: string; summary: string; step
 type EditableLabel = "verified" | "unresolved";
 type LibraryLabelFilter = "all" | KnowledgeDocumentSummary["label"];
 const knowledgeLabels: KnowledgeDocumentSummary["label"][] = ["verified", "unresolved", "outdated", "deprecated"];
-interface LibraryDetail { id: string; label: KnowledgeDocumentSummary["label"]; sourceSpace: string; updatedAt: string; transcriptVisible: boolean; canManage: boolean; canManageVisibility: boolean; organizationWide: boolean; originallyApprovedBy: string | null; lastUpdatedBy: string | null; draft: PublishedDraft; sourceContent?: SopContent | null; sourceMessages: Array<{ provider_message_id: string; author_display_name: string; source_markdown: string }> }
+export interface LibraryDetail { id: string; label: KnowledgeDocumentSummary["label"]; sourceSpace: string; updatedAt: string; transcriptVisible: boolean; canManage: boolean; canManageVisibility: boolean; organizationWide: boolean; originallyApprovedBy: string | null; lastUpdatedBy: string | null; draft: PublishedDraft; sourceContent?: SopContent | null; sourceMessages: Array<{ provider_message_id: string; author_display_name: string; source_markdown: string }> }
 
 export function PublishedDocumentContent({ detail }: { detail: Pick<LibraryDetail, "draft" | "sourceContent"> }) {
   if (detail.sourceContent) return <section className="published-source-content"><span>Original procedure</span><ContentBlocks blocks={detail.sourceContent.blocks} /></section>;

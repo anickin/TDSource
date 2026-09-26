@@ -91,3 +91,19 @@ and access-request rules are recorded in `docs/team-settings-access.md`.
   operations decision. Those rows contain encrypted credentials and token
   hashes, not approved knowledge or audit history, and MUST be purged on a
   defined schedule before the MVP is scaled broadly.
+
+## Knowledge Chat and submission safety
+
+- Knowledge Chat supports explicit button submission and Ctrl+Enter on Windows
+  or Command+Enter on macOS. Plain Enter remains available for multi-line input.
+- Cited Knowledge Chat sources open the current authorized library document or
+  SOP in an in-app dialog. The server MUST re-evaluate document access when the
+  source is opened; a citation identifier is never authorization by itself.
+- Knowledge Chat answers use short paragraphs, headings, and lists when useful.
+  The client renders only a small safe formatting subset and MUST NOT inject raw
+  model-generated HTML.
+- A reviewer MUST affirm that they are not submitting personal, customer,
+  confidential, or restricted data before publishing a review draft. An SOP
+  author MUST make the same affirmation before submitting an SOP for review.
+  Both the UI and API enforce these acknowledgements; rejecting a draft does not
+  require an acknowledgement because rejection does not publish its content.

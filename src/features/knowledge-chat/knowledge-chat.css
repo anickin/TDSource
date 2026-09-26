@@ -33,12 +33,19 @@
 .knowledge-message-assistant .knowledge-message-label { color: var(--tds-action, #005758); }
 .knowledge-message-copy p { margin: 0 0 var(--tds-space-4, 16px); font-size: 1rem; line-height: 1.7; white-space: pre-wrap; }
 .knowledge-message-copy p:last-child { margin-bottom: 0; }
+.knowledge-message-copy h3 { margin: var(--tds-space-5, 24px) 0 var(--tds-space-2, 8px); font-size: 1.05rem; line-height: 1.4; }
+.knowledge-message-copy h3:first-child { margin-top: 0; }
+.knowledge-message-copy :is(ul, ol) { margin: 0 0 var(--tds-space-4, 16px); padding-left: 1.4rem; }
+.knowledge-message-copy li { margin-bottom: var(--tds-space-2, 8px); line-height: 1.65; }
 
 .knowledge-message-sources { margin-top: var(--tds-space-4, 16px); padding-top: var(--tds-space-3, 12px); border-top: 1px solid var(--tds-border, #d9d8d7); }
 .knowledge-message-sources > span { display: block; margin-bottom: var(--tds-space-2, 8px); color: var(--ink-muted); font-size: .75rem; font-weight: 700; text-transform: uppercase; }
 .knowledge-message-sources ul { display: flex; flex-wrap: wrap; gap: var(--tds-space-2, 8px); margin: 0; padding: 0; list-style: none; }
 .knowledge-message-sources li { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--tds-border, #d9d8d7); background: #fff; color: var(--ink); font-size: .8rem; }
 .knowledge-message-sources a { color: inherit; }
+.knowledge-message-sources button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; text-decoration: underline; cursor: pointer; }
+.knowledge-message-sources button:hover { color: var(--tds-action, #005758); }
+.knowledge-source-dialog .published-document { padding: var(--tds-space-6, 32px); overflow-y: auto; }
 
 .knowledge-chat-page .knowledge-chat-status,
 .knowledge-chat-page .knowledge-chat-alert { display: flex; width: min(100%, 820px); align-items: center; align-self: center; gap: var(--tds-space-3, 12px); margin: 0 auto; padding: var(--tds-space-4, 16px); border: 1px solid var(--tds-border, #d9d8d7); background: var(--tds-cloud, #f5fbfa); color: var(--ink-muted); }

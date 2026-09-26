@@ -24,6 +24,7 @@ export function SopPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [submitError, setSubmitError] = useState("");
+  const [dataHandlingConfirmed, setDataHandlingConfirmed] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [highlightedFile, setHighlightedFile] = useState("");
@@ -86,7 +87,7 @@ export function SopPage() {
     try {
       const response = await fetch("/api/sops/generate", { method: "POST", body: form, credentials: "same-origin", signal: controller.signal });
       const data = await readSopResponse<SopResult>(response, "The SOP could not be generated. Try again.");
-      setResult(data); setResultFiles(files); setEditing(false); setSubmitMessage(""); setSubmitError("");
+      setResult(data); setResultFiles(files); setEditing(false); setSubmitMessage(""); setSubmitError(""); setDataHandlingConfirmed(false);
     } catch (cause) {
       setError(controller.signal.aborted ? "Generation canceled. Your selected documents and notes are still here." : cause instanceof Error ? cause.message : "The SOP could not be generated. Try again.");
     } finally { setBusy(false); requestRef.current = null; }
@@ -101,7 +102,7 @@ export function SopPage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify(result),
+        body: JSON.stringify({ result, dataHandlingConfirmed }),
       });
       const data = await readSopResponse<{ message?: string; documentId?: string }>(response, "The SOP could not be submitted for review. Your draft is still here.");
       invalidateApiCache("/api/reviews");
@@ -155,7 +156,7 @@ export function SopPage() {
       <aside className="sop-guide"><section className="sop-tip"><ShieldCheck size={20} aria-hidden="true" /><h3>You stay in control</h3><p>Generated procedures remain unpublished until you submit them for moderator review. Reviewers can edit, approve, reject, and choose whether approved knowledge is shared with everyone or kept private to the selected team.</p></section><section className="sop-tip"><FileText size={20} aria-hidden="true" /><h3>Keep visual context</h3><p>Word and Excel retain supported text formatting and images. Some layout and graphics may not transfer. PDF transcription uses AI and must be checked against the original; it does not guarantee completeness.</p></section></aside>
     </div>}
     {result && <section ref={draftRef} tabIndex={-1} className="panel sop-result" aria-labelledby="sop-draft-heading">
-      <header className="sop-result-heading"><div><span className="eyebrow">Unpublished · Review required</span><h2 id="sop-draft-heading">Your SOP draft</h2><p>Review the imported content and make any changes before publication. This draft is not yet in the knowledge library.</p></div><div className="sop-result-actions">{!result.content && <button type="button" className="sop-secondary-button" disabled={busy || submitting} onClick={() => setEditing((value) => !value)}>{editing ? <Check size={16} /> : <Pencil size={16} />}{editing ? "Preview draft" : "Edit draft"}</button>}<button type="button" className="primary-button" onClick={download}><Download size={16} />Download draft</button><button type="button" className="primary-button sop-submit-button" disabled={submitting || Boolean(submitMessage)} onClick={() => void submitForReview()}>{submitting ? <LoaderCircle size={16} className="spin" /> : <ShieldCheck size={16} />}{submitting ? "Submitting…" : submitMessage ? "Submitted for review" : "Submit for review"}</button><button type="button" className="sop-secondary-button" disabled={submitting} onClick={() => { setResult(null); setResultFiles([]); setFiles([]); setTitle(""); setNotes(""); setSuggestEdits(false); setEditing(false); submitRef.current = false; setSubmitMessage(""); setSubmitError(""); }}>Create another SOP</button></div>{submitMessage && <p className="sop-submit-message" role="status">{submitMessage}</p>}{submitError && <p className="sop-submit-error" role="alert">{submitError}</p>}</header>
+      <header className="sop-result-heading"><div><span className="eyebrow">Unpublished · Review required</span><h2 id="sop-draft-heading">Your SOP draft</h2><p>Review the imported content and make any changes before publication. This draft is not yet in the knowledge library.</p></div><div className="sop-result-actions">{!result.content && <button type="button" className="sop-secondary-button" disabled={busy || submitting} onClick={() => setEditing((value) => !value)}>{editing ? <Check size={16} /> : <Pencil size={16} />}{editing ? "Preview draft" : "Edit draft"}</button>}<button type="button" className="primary-button" onClick={download}><Download size={16} />Download draft</button><button type="button" className="primary-button sop-submit-button" disabled={submitting || Boolean(submitMessage) || !dataHandlingConfirmed} onClick={() => void submitForReview()}>{submitting ? <LoaderCircle size={16} className="spin" /> : <ShieldCheck size={16} />}{submitting ? "Submitting…" : submitMessage ? "Submitted for review" : "Submit for review"}</button><button type="button" className="sop-secondary-button" disabled={submitting} onClick={() => { setResult(null); setResultFiles([]); setFiles([]); setTitle(""); setNotes(""); setSuggestEdits(false); setEditing(false); setDataHandlingConfirmed(false); submitRef.current = false; setSubmitMessage(""); setSubmitError(""); }}>Create another SOP</button></div><label className="submission-confirmation sop-submission-confirmation"><input type="checkbox" checked={dataHandlingConfirmed} onChange={(event) => setDataHandlingConfirmed(event.target.checked)} /><span>I confirm that I am not submitting any personal, customer, confidential, or restricted data.</span></label>{submitMessage && <p className="sop-submit-message" role="status">{submitMessage}</p>}{submitError && <p className="sop-submit-error" role="alert">{submitError}</p>}</header>
       <fieldset disabled={busy || submitting} className="sop-fields sop-draft-body">
         {result.content ? <SopContentView content={result.content} onChange={(content) => setResult((current) => current ? { ...current, content } : current)} /> : <>
         {editing ? <><label className="sop-field">Title<input value={result.draft.title} onChange={(event) => updateDraft({ title: event.target.value })} maxLength={200} /></label><label className="sop-field">Purpose<textarea rows={3} value={result.draft.summary} onChange={(event) => updateDraft({ summary: event.target.value })} /></label></> : <><h2>{result.draft.title}</h2><p className="sop-summary">{result.draft.summary}</p></>}
