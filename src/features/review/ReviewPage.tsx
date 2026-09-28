@@ -20,6 +20,7 @@ export function ReviewPage() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [organizationWide, setOrganizationWide] = useState(true);
+  const [dataHandlingConfirmed, setDataHandlingConfirmed] = useState(false);
 
   const load = useCallback(async () => {
     setState("loading");
@@ -37,9 +38,9 @@ export function ReviewPage() {
     }
   }, [items, state, searchParams]);
 
-  const close = () => { setSelected(null); setDetail(null); setEdit(null); setSaveMessage(""); setOrganizationWide(true); };
+  const close = () => { setSelected(null); setDetail(null); setEdit(null); setSaveMessage(""); setOrganizationWide(true); setDataHandlingConfirmed(false); };
   const open = async (item: ReviewItem) => {
-    setSelected(item); setDetail(null); setEdit(null); setSaveMessage(""); setOrganizationWide(item.organizationWide !== false);
+    setSelected(item); setDetail(null); setEdit(null); setSaveMessage(""); setOrganizationWide(item.organizationWide !== false); setDataHandlingConfirmed(false);
     try {
       const loaded = await getJsonCached<ReviewDetail>(`/api/reviews/${item.id}`);
       setDetail(loaded); setEdit({ ...loaded.draft, steps: [...loaded.draft.steps], warnings: [...loaded.draft.warnings] }); setOrganizationWide(loaded.organizationWide !== false);
@@ -65,7 +66,7 @@ export function ReviewPage() {
     if (dirty && !await saveDraft()) return;
     setSaving(true);
     try {
-      const response = await fetch(`/api/reviews/${selected.id}/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label, organizationWide }) });
+      const response = await fetch(`/api/reviews/${selected.id}/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label, organizationWide, dataHandlingConfirmed: action === "approve" ? dataHandlingConfirmed : undefined }) });
       if (!response.ok) throw new Error();
       invalidateApiCache("/api/reviews"); invalidateApiCache("/api/library"); close(); await load();
     } finally { setSaving(false); }
@@ -78,6 +79,6 @@ export function ReviewPage() {
     <section className="review-list">{items.map((item) => <article className="review-row interactive-card" key={item.id} role="button" tabIndex={0} onClick={() => void open(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void open(item); } }}><div className="row-meta"><span className="tag">{item.reason.replaceAll("_", " ")}</span><span>{item.teamName}</span><span>{item.organizationWide !== false ? "Everyone" : "Team private"}</span></div><h2>{item.title}</h2><p>{item.sourceSpace}</p><div className="review-row-footer"><span>{new Date(item.requestedAt).toLocaleString()}</span><span className="card-action">Review source &amp; draft <ArrowRight size={15} /></span></div></article>)}</section>
     {selected && <div className="review-dialog-backdrop" role="presentation" onMouseDown={close}><section className="review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title" onMouseDown={(event) => event.stopPropagation()}><header><div><span className="eyebrow">{selected.teamName}</span><h2 id="review-title">{edit?.title || selected.title}</h2><p>{selected.sourceSpace} · Requested by {selected.requestedBy}</p></div><button className="icon-button" onClick={close} aria-label="Close review"><X size={20} /></button></header>
       {!detail || !edit ? <div className="empty-state"><LoaderCircle className="spin" size={22} /><p>Loading source and draft…</p></div> : <div className="review-compare"><article><span>{detail.sourceContent ? "Original procedure" : "Original conversation thread"}</span>{detail.sourceContent ? <ContentBlocks blocks={detail.sourceContent.blocks} /> : <><h3>{detail.sourceMessages.length} Webex messages</h3>{detail.sourceMessages.map((message) => <div className="source-review-message" key={message.provider_message_id}><strong>{message.author_display_name}</strong><p>{message.source_markdown}</p></div>)}</>}</article><article className="draft-editor"><span>Editable review draft</span><label>Title<input value={edit.title} onChange={(event) => update("title", event.target.value)} /></label><label>Problem<textarea rows={3} value={edit.problem} onChange={(event) => update("problem", event.target.value)} /></label><label>Suggested summary<textarea rows={6} value={edit.summary} onChange={(event) => update("summary", event.target.value)} /></label><label>Actions needed <small>One action per line</small><textarea rows={6} value={edit.steps.join("\n")} onChange={(event) => update("steps", event.target.value.split("\n").map((line) => line.trim()).filter(Boolean))} /></label><label>Warnings <small>One warning per line</small><textarea rows={3} value={edit.warnings.join("\n")} onChange={(event) => update("warnings", event.target.value.split("\n").map((line) => line.trim()).filter(Boolean))} /></label><div className="review-visibility"><span className="review-visibility-icon">{organizationWide ? <Building2 size={18} /> : <LockKeyhole size={18} />}</span><div><strong>{organizationWide ? "Available to everyone after approval" : `Private to ${selected.teamName}`}</strong><span>The approved Q&amp;A is shared by default. The original conversation remains restricted.</span><label><input type="checkbox" checked={!organizationWide} onChange={(event) => setOrganizationWide(!event.target.checked)} /> Keep this document private to the assigned team</label></div></div>{saveMessage && <p className="draft-save-message" role="status">{saveMessage}</p>}</article></div>}
-      <footer><div><Database size={15} /><span>Edits and moderation are versioned and audited.</span></div><button disabled={saving || !detail || !dirty} onClick={() => void saveDraft()}><Save size={15} /> {saving ? "Saving…" : dirty ? "Save edits" : "Saved"}</button><button disabled={saving || !detail} onClick={() => void moderate("reject")}>Reject draft</button><button disabled={saving || !detail} onClick={() => void moderate("approve", "unresolved")}>Publish unresolved</button><button className="primary-button" disabled={saving || !detail} onClick={() => void moderate("approve", "verified")}>Approve resolved issue</button></footer></section></div>}
+      <footer><label className="submission-confirmation"><input type="checkbox" checked={dataHandlingConfirmed} onChange={(event) => setDataHandlingConfirmed(event.target.checked)} /><span>I confirm that I am not submitting any personal, customer, confidential, or restricted data.</span></label><div><Database size={15} /><span>Edits and moderation are versioned and audited.</span></div><button disabled={saving || !detail || !dirty} onClick={() => void saveDraft()}><Save size={15} /> {saving ? "Saving…" : dirty ? "Save edits" : "Saved"}</button><button disabled={saving || !detail} onClick={() => void moderate("reject")}>Reject draft</button><button disabled={saving || !detail || !dataHandlingConfirmed} onClick={() => void moderate("approve", "unresolved")}>Publish unresolved</button><button className="primary-button" disabled={saving || !detail || !dataHandlingConfirmed} onClick={() => void moderate("approve", "verified")}>Approve resolved issue</button></footer></section></div>}
   </div>;
 }
