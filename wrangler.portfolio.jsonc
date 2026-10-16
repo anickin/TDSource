@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tdsource-portfolio",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-08-27",
+  "vars": {
+    "TDS_DEPLOYMENT_MODE": "portfolio",
+    "APP_ORIGIN": "https://tdsource.nickolasinit.com",
+    "WEBEX_REDIRECT_URI": "https://tdsource.nickolasinit.com/api/auth/webex/callback",
+    "APPROVED_EMAIL_DOMAINS": "tdsynnex.com",
+    "SESSION_COOKIE_NAME": "__Host-tds_session",
+    "LLM_PROVIDER": "gemini",
+    "LLM_MODEL": "gemini-2.5-flash",
+    "LLM_BASE_URL": "",
+    "LLM_API_KEY": "",
+    "GEMINI_AI_API": "",
+    "EMBEDDING_PROVIDER": "gemini",
+    "EMBEDDING_MODEL": "gemini-embedding-2",
+    "EMBEDDING_BASE_URL": "",
+    "EMBEDDING_API_KEY": "",
+    "RAG_VECTOR_ENABLED": "true",
+    "RAG_BACKFILL_ADMIN_EMAILS": ""
+  },
+  "secrets": {
+    "required": [
+      "SESSION_ENCRYPTION_KEY",
+      "SCHEDULER_SECRET",
+      "WEBEX_CLIENT_ID",
+      "WEBEX_CLIENT_SECRET",
+      "SUPABASE_URL",
+      "SUPABASE_SECRET_KEY"
+    ]
+  },
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  }
+}

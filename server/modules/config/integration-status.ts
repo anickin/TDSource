@@ -1,4 +1,5 @@
 export interface IntegrationEnvironment {
+  TDS_DEPLOYMENT_MODE?: string;
   WEBEX_CLIENT_ID?: string;
   WEBEX_CLIENT_SECRET?: string;
   WEBEX_REDIRECT_URI?: string;
@@ -23,6 +24,14 @@ export interface IntegrationEnvironment {
 
 function isConfigured(...values: Array<string | undefined>): boolean {
   return values.every((value) => Boolean(value?.trim()));
+}
+
+export function deploymentMode(env: IntegrationEnvironment): "product" | "portfolio" {
+  return env.TDS_DEPLOYMENT_MODE?.trim().toLowerCase() === "portfolio" ? "portfolio" : "product";
+}
+
+export function webexCaptureEnabled(env: IntegrationEnvironment): boolean {
+  return deploymentMode(env) === "product";
 }
 
 export function geminiKey(env: IntegrationEnvironment): string | undefined {
@@ -70,9 +79,12 @@ export function supabaseSecret(env: IntegrationEnvironment): string | undefined 
 }
 
 export function integrationStatus(env: IntegrationEnvironment) {
+  const captureEnabled = webexCaptureEnabled(env);
   return {
+    deploymentMode: deploymentMode(env),
+    webexCaptureEnabled: captureEnabled,
     webexOAuthConfigured: isConfigured(env.WEBEX_CLIENT_ID, env.WEBEX_CLIENT_SECRET, env.WEBEX_REDIRECT_URI, env.SESSION_ENCRYPTION_KEY),
-    webexBotConfigured: isConfigured(env.WEBEX_BOT_ACCESS_TOKEN, env.WEBEX_BOT_NAME, env.WEBEX_WEBHOOK_SECRET),
+    webexBotConfigured: captureEnabled && isConfigured(env.WEBEX_BOT_ACCESS_TOKEN, env.WEBEX_BOT_NAME, env.WEBEX_WEBHOOK_SECRET),
     supabaseConfigured: isConfigured(env.SUPABASE_URL, supabaseSecret(env)),
     llmConfigured: llmConfigured(env),
     llmProvider: llmProvider(env),

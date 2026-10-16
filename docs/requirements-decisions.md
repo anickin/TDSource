@@ -2,6 +2,21 @@
 
 Later addenda supersede earlier recommendations where they conflict.
 
+## Portfolio deployment decision
+
+The operational TDSource product has been superseded by a separate Microsoft
+automation pipeline. The self-hosted TDSource web application is now a
+portfolio/archive deployment: it is not a capture source and is not integrated
+with that Microsoft pipeline. It retains Webex OAuth sign-in, the existing
+searchable Q&A/document experience, and Knowledge Chat/RAG.
+
+This is a deployment-profile exception, not a rewrite of the historical product
+requirements recorded below. `TDS_DEPLOYMENT_MODE=portfolio` disables Webex bot
+capture, room discovery, webhook processing/registration, and capture-identity
+token persistence. The default `product` profile continues to enforce the
+original workflow invariants if it is ever run for historical testing or a
+controlled rollback.
+
 ## Resolved by the addenda
 
 - Spaces are not categorically excluded, and pinned spaces cannot have capture disabled. Publication remains independently Basic-visible or staff-only.

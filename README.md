@@ -1,6 +1,6 @@
 # The Document Source
 
-Production scaffold for TD SYNNEX's private Webex-to-knowledge-base application.
+Portfolio-ready archive of TD SYNNEX's former Webex-to-knowledge-base application.
 
 The product is bot-triggered automation: a user replies in a Webex thread with
 `@<capture-identity> document` or `@<capture-identity> update`; TDS verifies the
@@ -21,13 +21,28 @@ The Vite development server and Worker API share one origin. Use `pnpm deploy`
 to deploy the Worker and static assets after authenticating Wrangler. Store
 production credentials with `wrangler secret put`; do not add them to `.env`.
 
-The deployed Webex integration must register
-`https://the-document-source.nickolaskg.workers.dev/api/auth/webex/callback`
-as an exact redirect URI. OAuth uses Authorization Code with PKCE, validates the
+The historical Cloudflare deployment used
+`https://the-document-source.nickolaskg.workers.dev/api/auth/webex/callback`.
+The Debian portfolio deployment uses the redirect documented below. OAuth uses Authorization Code with PKCE, validates the
 returned state and nonce, restricts sign-in to configured email domains, and
 stores only an encrypted short-lived identity session in the browser cookie.
 
 Development and production both load authoritative server data. Empty integrations produce honest loading, empty, or configuration states rather than representative records.
+
+## Debian portfolio deployment
+
+The supported self-hosted profile keeps Webex OAuth sign-in, the searchable Q&A
+library, document views, and Knowledge Chat/RAG. It disables message capture,
+Webex room discovery, capture-identity storage, and webhook registration.
+
+Use `docker-compose.yml` with `TDS_DEPLOYMENT_MODE=portfolio`. The exact Webex
+OAuth redirect URI for this deployment is:
+
+`https://tdsource.nickolasinit.com/api/auth/webex/callback`
+
+See `docs/docker-self-hosting.md` for the Debian, reverse-proxy, secret, Webex,
+and validation steps. The existing Cloudflare product configuration remains
+available for historical reference and is not used by the portfolio container.
 
 See `docs/architecture.md` for module boundaries and `docs/requirements-decisions.md` for reconciled requirements and unresolved product decisions.
 

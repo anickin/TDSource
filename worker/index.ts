@@ -6,7 +6,7 @@ import { isApprovedEmail } from "../server/modules/auth/email-domain.js";
 import { parseCaptureCommand, type CaptureCommand } from "../server/modules/capture/command.js";
 import { redactForLlm } from "../server/modules/redaction/redact.js";
 import { resolveCaptureReviewTeam } from "../server/modules/access/team-policy.js";
-import { embeddingConfigured, embeddingModel, embeddingProvider, integrationStatus, llmConfigured, supabaseSecret } from "../server/modules/config/integration-status.js";
+import { embeddingConfigured, embeddingModel, embeddingProvider, integrationStatus, llmConfigured, supabaseSecret, webexCaptureEnabled } from "../server/modules/config/integration-status.js";
 import { LlmProviderError, requestLlmJson } from "../server/modules/llm/provider.js";
 import { buildConversationContext, buildKnowledgeContext, buildRetrievalQuery, chatHistory, chatQuestion, mergeRankedKnowledge, parseChatResponse, rankKnowledge, type KnowledgeRecord } from "../server/modules/knowledge/chat.js";
 import { buildKnowledgeChunks } from "../server/modules/rag/chunks.js";
@@ -15,6 +15,7 @@ import { indexKnowledgeVersion } from "../server/modules/rag/indexing.js";
 import { retrieveKnowledgeChunks } from "../server/modules/rag/retrieval.js";
 
 interface Env {
+  TDS_DEPLOYMENT_MODE?: string;
   APP_ORIGIN?: string;
   APPROVED_EMAIL_DOMAINS?: string;
   SESSION_COOKIE_NAME?: string;
@@ -41,6 +42,7 @@ interface Env {
   EMBEDDING_API_KEY?: string;
   RAG_VECTOR_ENABLED?: string;
   RAG_BACKFILL_ADMIN_EMAILS?: string;
+  SCHEDULER_SECRET?: string;
 }
 
 interface OAuthTransaction {
@@ -511,6 +513,21 @@ function appOrigin(request: Request, env: Env): string {
   return configured ? new URL(configured).origin : new URL(request.url).origin;
 }
 
+export function webexOAuthScopes(captureEnabled: boolean): string {
+  const scopes = ["openid", "email", "profile", "spark:people_read"];
+  if (captureEnabled) scopes.push("spark:rooms_read", "spark:messages_read", "spark:kms");
+  return scopes.join(" ");
+}
+
+export function webexAutomationRoute(pathname: string): boolean {
+  return pathname === "/api/webex/rooms"
+    || pathname === "/api/webex/messages"
+    || pathname === "/api/captures/webex"
+    || pathname === "/api/webhooks/webex"
+    || pathname === "/api/admin/webex/webhook"
+    || pathname === "/api/admin/settings/rooms";
+}
+
 function approvedDomains(env: Env): string[] {
   return (env.APPROVED_EMAIL_DOMAINS || "tdsynnex.com").split(",").map((domain) => domain.trim().toLowerCase()).filter(Boolean);
 }
@@ -767,7 +784,7 @@ async function startOAuth(request: Request, env: Env): Promise<Response> {
     response_type: "code",
     client_id: env.WEBEX_CLIENT_ID!,
     redirect_uri: env.WEBEX_REDIRECT_URI!,
-    scope: "openid email profile spark:people_read spark:rooms_read spark:messages_read spark:kms",
+    scope: webexOAuthScopes(webexCaptureEnabled(env)),
     state,
     nonce,
     code_challenge: toBase64Url(new Uint8Array(digest)),
@@ -853,7 +870,7 @@ async function finishOAuth(request: Request, env: Env): Promise<Response> {
     const displayName = profile.name?.trim() || [profile.given_name, profile.family_name].filter(Boolean).join(" ").trim() || email;
     const appIdentity = await provisionAppIdentity(env, { subject: profile.sub, email, displayName });
     if (!appIdentity) throw new Error("TDS application identity could not be provisioned");
-    await persistCaptureIdentity(env, appIdentity, tokens);
+    if (webexCaptureEnabled(env)) await persistCaptureIdentity(env, appIdentity, tokens);
     const durableSession = await createDurableUserSession(env, {
       subject: profile.sub,
       email,
@@ -941,6 +958,17 @@ export async function verifyWebhookSignature(body: string, signature: string | n
   const expected = Array.from(signed, (byte) => byte.toString(16).padStart(2, "0")).join("");
   let difference = 0;
   for (let index = 0; index < expected.length; index += 1) difference |= expected.charCodeAt(index) ^ signature.toLowerCase().charCodeAt(index);
+  return difference === 0;
+}
+
+export async function verifyInternalBearer(authorization: string | null, secret: string | undefined): Promise<boolean> {
+  if (!secret?.trim() || !authorization?.startsWith("Bearer ")) return false;
+  const supplied = authorization.slice("Bearer ".length);
+  const [expectedHash, suppliedHash] = await Promise.all([sha256Hex(secret), sha256Hex(supplied)]);
+  let difference = expectedHash.length ^ suppliedHash.length;
+  for (let index = 0; index < expectedHash.length; index += 1) {
+    difference |= expectedHash.charCodeAt(index) ^ (suppliedHash.charCodeAt(index) || 0);
+  }
   return difference === 0;
 }
 
@@ -1277,18 +1305,20 @@ async function configureWebexWebhook(request: Request, env: Env): Promise<Respon
 async function getIntegrationSettings(request: Request, env: Env): Promise<Response> {
   const session = await readSession(request, env);
   if (!session?.organizationId || !session.teamRoles?.some(({ role }) => role === "admin") || !canAccessIntegrationSettings(session.email)) return json({ code: "NOT_FOUND" }, 404);
-  const identities = await supabaseRequest<Array<{ webhook_id: string | null; enabled: boolean }>>(env,
-    `webex_capture_identities?organization_id=eq.${session.organizationId}&select=webhook_id,enabled&limit=1`);
+  const captureEnabled = webexCaptureEnabled(env);
+  const identities = captureEnabled ? await supabaseRequest<Array<{ webhook_id: string | null; enabled: boolean }>>(env,
+    `webex_capture_identities?organization_id=eq.${session.organizationId}&select=webhook_id,enabled&limit=1`) : [];
   const identity = identities[0];
   const integrations = integrationStatus(env);
   const adminTeam = session.teamRoles.find(({ role }) => role === "admin");
-  const policies = adminTeam ? await supabaseRequest<Array<{ source_space_id: string }>>(env,
+  const policies = captureEnabled && adminTeam ? await supabaseRequest<Array<{ source_space_id: string }>>(env,
     `team_space_policies?team_id=eq.${adminTeam.teamId}&staff_visibility=eq.true&select=source_space_id`) : [];
   return json({
+    captureEnabled,
     integrations: {
       webexOAuth: integrations.webexOAuthConfigured,
-      webexCapture: integrations.webexBotConfigured && Boolean(identity?.enabled),
-      webhook: Boolean(identity?.webhook_id),
+      webexCapture: captureEnabled && integrations.webexBotConfigured && Boolean(identity?.enabled),
+      webhook: captureEnabled && Boolean(identity?.webhook_id),
       supabase: integrations.supabaseConfigured,
       llm: integrations.llmConfigured,
     },
@@ -1303,10 +1333,11 @@ async function getInitialSetup(request: Request, env: Env): Promise<Response> {
   if (!session?.appUserId || !session.organizationId || !session.teamRoles?.some(({ role }) => role === "admin")) return json({ code: "ADMIN_REQUIRED" }, 403);
   const organizations = await supabaseRequest<Array<{ initial_setup_completed_at: string | null }>>(env, `organizations?id=eq.${session.organizationId}&select=initial_setup_completed_at&limit=1`);
   const adminTeam = session.teamRoles.find(({ role }) => role === "admin");
-  if (!env.WEBEX_BOT_ACCESS_TOKEN) return json({ completed: Boolean(organizations[0]?.initial_setup_completed_at), teamName: adminTeam?.teamName || "", rooms: [] });
+  const captureEnabled = webexCaptureEnabled(env);
+  if (!captureEnabled || !env.WEBEX_BOT_ACCESS_TOKEN) return json({ completed: Boolean(organizations[0]?.initial_setup_completed_at), teamName: adminTeam?.teamName || "", rooms: [], captureEnabled });
   const discovery = await botRooms(env);
   if (!discovery.available) return json({ code: "WEBEX_ROOMS_UNAVAILABLE", message: "Webex spaces could not be loaded for initial setup." }, 503);
-  return json({ completed: Boolean(organizations[0]?.initial_setup_completed_at), teamName: adminTeam?.teamName || "", rooms: discovery.rooms });
+  return json({ completed: Boolean(organizations[0]?.initial_setup_completed_at), teamName: adminTeam?.teamName || "", rooms: discovery.rooms, captureEnabled });
 }
 
 async function completeInitialSetup(request: Request, env: Env): Promise<Response> {
@@ -1323,11 +1354,12 @@ async function completeInitialSetup(request: Request, env: Env): Promise<Respons
     return [{ email, role }];
   }) : [];
   const roomIds = Array.isArray(body.roomIds) ? [...new Set(body.roomIds.filter((value): value is string => typeof value === "string"))] : [];
-  if (!teamName || teamName.length > 120 || roomIds.length === 0 || !env.WEBEX_BOT_ACCESS_TOKEN) return json({ code: "INVALID_SETUP", message: "Provide a team name and at least one approved Webex space." }, 400);
+  const captureEnabled = webexCaptureEnabled(env);
+  if (!teamName || teamName.length > 120 || (captureEnabled && (roomIds.length === 0 || !env.WEBEX_BOT_ACCESS_TOKEN))) return json({ code: "INVALID_SETUP", message: captureEnabled ? "Provide a team name and at least one approved Webex space." : "Provide a team name." }, 400);
   if (invitations.some(({ email }) => !isApprovedEmail(email, approvedDomains(env)))) return json({ code: "INVALID_INVITEE", message: "Invitees must use an approved organization email address." }, 400);
-  const listed = await webexTokenData<WebexList<WebexRoom>>("rooms?max=100", env.WEBEX_BOT_ACCESS_TOKEN);
+  const listed = captureEnabled ? await webexTokenData<WebexList<WebexRoom>>("rooms?max=100", env.WEBEX_BOT_ACCESS_TOKEN!) : { items: [] };
   const rooms = (listed.items || []).filter((room) => room.id && room.type !== "direct" && roomIds.includes(room.id)).map((room) => ({ id: room.id!, title: room.title || "Untitled Webex space" }));
-  if (rooms.length !== roomIds.length) return json({ code: "INVALID_ROOM_SELECTION" }, 400);
+  if (captureEnabled && rooms.length !== roomIds.length) return json({ code: "INVALID_ROOM_SELECTION" }, 400);
   await supabaseRequest<void>(env, "rpc/complete_initial_admin_setup", { method: "POST", body: JSON.stringify({ p_organization_id: session.organizationId, p_actor_user_id: session.appUserId, p_team_name: teamName, p_invited_emails: invitations, p_rooms: rooms }) });
   return json({ ok: true });
 }
@@ -1416,6 +1448,7 @@ async function getAdminSettings(request: Request, env: Env): Promise<Response> {
   const completedAt = performance.now();
   return json({
     currentUserId: session.appUserId, selectedTeamId: grant.teamId, signInUrl: appOrigin(request, env), teams,
+    webexCaptureEnabled: webexCaptureEnabled(env),
     selectedTeam: teams.find(({ id }) => id === grant.teamId) || { id: grant.teamId, name: grant.teamName, status: "active", archived_at: null },
     members: memberships.map((membership) => {
       const user = users.find(({ id }) => id === membership.user_id);
@@ -1520,13 +1553,15 @@ async function readAdminSetupInvitation(request: Request, env: Env): Promise<Res
   const invitation = invitations[0];
   if (!invitation || invitation.redeemed_at || invitation.revoked_at || Date.parse(invitation.expires_at) <= Date.now()) return json({ code: "INVITATION_UNAVAILABLE" }, 410);
   const session = await readAdminSetupSession(request, env);
-  if (!session) return json({ authenticated: false, email: invitation.email, expiresAt: invitation.expires_at, rooms: [] });
+  const captureEnabled = webexCaptureEnabled(env);
+  if (!session) return json({ authenticated: false, email: invitation.email, expiresAt: invitation.expires_at, rooms: [], captureEnabled });
   if (session.email.toLowerCase() !== invitation.email) return json({ code: "INVITATION_EMAIL_MISMATCH", message: `Sign in with ${invitation.email} to use this invitation.` }, 403);
   await supabaseRequest<void>(env, `team_admin_setup_invitations?id=eq.${invitation.id}&started_at=is.null`, {
     method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ started_at: new Date().toISOString() }),
   });
+  if (!captureEnabled) return json({ authenticated: true, email: invitation.email, expiresAt: invitation.expires_at, rooms: [], roomsAvailable: true, captureEnabled });
   const available = await botRooms(env, { fresh: true });
-  return json({ authenticated: true, email: invitation.email, expiresAt: invitation.expires_at, rooms: available.rooms, roomsAvailable: available.available });
+  return json({ authenticated: true, email: invitation.email, expiresAt: invitation.expires_at, rooms: available.rooms, roomsAvailable: available.available, captureEnabled });
 }
 
 async function completeAdminSetupInvitation(request: Request, env: Env): Promise<Response> {
@@ -1543,11 +1578,12 @@ async function completeAdminSetupInvitation(request: Request, env: Env): Promise
   const teamName = typeof body.teamName === "string" ? body.teamName.trim() : "";
   const invitations = cleanInvitations(body.invitations, env);
   const roomIds = Array.isArray(body.roomIds) ? [...new Set(body.roomIds.filter((id): id is string => typeof id === "string"))] : [];
-  if (!teamName || teamName.length > 120 || !invitations || roomIds.length === 0) return json({ code: "INVALID_SETUP", message: "Provide a team name and at least one Webex space." }, 400);
-  const available = await botRooms(env, { fresh: true });
+  const captureEnabled = webexCaptureEnabled(env);
+  if (!teamName || teamName.length > 120 || !invitations || (captureEnabled && roomIds.length === 0)) return json({ code: "INVALID_SETUP", message: captureEnabled ? "Provide a team name and at least one Webex space." : "Provide a team name." }, 400);
+  const available = captureEnabled ? await botRooms(env, { fresh: true }) : { rooms: [], available: true };
   if (!available.available) return json({ code: "WEBEX_ROOMS_UNAVAILABLE" }, 503);
   const selected = available.rooms.filter(({ id }) => roomIds.includes(id));
-  if (selected.length !== roomIds.length) return json({ code: "INVALID_ROOM_SELECTION" }, 400);
+  if (captureEnabled && selected.length !== roomIds.length) return json({ code: "INVALID_ROOM_SELECTION" }, 400);
   const teamId = await supabaseRequest<string>(env, "rpc/complete_team_admin_setup_invitation", {
     method: "POST",
     body: JSON.stringify({ p_invitation_id: context.invitationId, p_token_hash: context.tokenHash, p_user_id: session.appUserId, p_team_name: teamName, p_invitations: invitations, p_rooms: selected }),
@@ -1562,10 +1598,11 @@ async function createTeam(request: Request, env: Env): Promise<Response> {
   const invitations = cleanInvitations(body.invitations, env);
   const roomIds = Array.isArray(body.roomIds) ? [...new Set(body.roomIds.filter((id): id is string => typeof id === "string"))] : [];
   if (!name || name.length > 120 || !invitations) return json({ code: "INVALID_TEAM" }, 400);
-  const available = await botRooms(env, { fresh: true });
+  const captureEnabled = webexCaptureEnabled(env);
+  const available = captureEnabled ? await botRooms(env, { fresh: true }) : { rooms: [], available: true };
   if (!available.available) return json({ code: "WEBEX_ROOMS_UNAVAILABLE", message: "Webex spaces could not be loaded." }, 503);
   const selected = available.rooms.filter(({ id }) => roomIds.includes(id));
-  if (selected.length !== roomIds.length) return json({ code: "INVALID_ROOM_SELECTION" }, 400);
+  if (captureEnabled && selected.length !== roomIds.length) return json({ code: "INVALID_ROOM_SELECTION" }, 400);
   const teamId = await supabaseRequest<string>(env, "rpc/create_team_with_setup", { method: "POST", body: JSON.stringify({ p_organization_id: auth.session.organizationId, p_actor_user_id: auth.session.appUserId, p_team_name: name, p_invitations: invitations, p_rooms: selected }) });
   return json({ ok: true, teamId }, 201);
 }
@@ -2415,6 +2452,12 @@ async function submitSopReview(request: Request, env: Env): Promise<Response> {
 
 async function handleApi(request: Request, env: Env, waitUntil: (promise: Promise<unknown>) => void): Promise<Response> {
   const { pathname } = new URL(request.url);
+  if (request.method === "POST" && pathname === "/api/internal/scheduled") {
+    if (!await verifyInternalBearer(request.headers.get("authorization"), env.SCHEDULER_SECRET)) return json({ code: "NOT_FOUND" }, 404);
+    waitUntil(processKnowledgeIndexQueue(env));
+    return json({ accepted: true }, 202);
+  }
+  if (!webexCaptureEnabled(env) && webexAutomationRoute(pathname)) return json({ code: "NOT_FOUND" }, 404);
   if ((request.method === "GET" && pathname === "/api/sops/config") || (request.method === "POST" && pathname === "/api/sops/generate")) return handleSopRequest(request, env, () => readSession(request, env));
   if (request.method === "POST" && pathname === "/api/sops/submit-review") return submitSopReview(request, env);
   if (request.method === "GET" && pathname === "/api/health") return json({
@@ -2425,7 +2468,7 @@ async function handleApi(request: Request, env: Env, waitUntil: (promise: Promis
       supabaseServerKey: Boolean(supabaseSecret(env)),
     },
   });
-  if (request.method === "GET" && pathname === "/api/config") return json({ botName: env.WEBEX_BOT_NAME?.trim() || "TDS" });
+  if (request.method === "GET" && pathname === "/api/config") return json({ botName: env.WEBEX_BOT_NAME?.trim() || "TDS", portfolioMode: !webexCaptureEnabled(env), webexCaptureEnabled: webexCaptureEnabled(env) });
   if (request.method === "GET" && pathname === "/api/auth/webex/start") return startOAuth(request, env);
   if (request.method === "GET" && pathname === "/api/auth/webex/callback") return finishOAuth(request, env);
   if (request.method === "GET" && pathname === "/api/auth/session") return getSession(request, env);

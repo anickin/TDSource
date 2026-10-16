@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildKnowledgeContext, rankKnowledge } from "../server/modules/knowledge/chat.js";
-import { adminSetupInvitationStatus, canAccessIntegrationSettings, defaultReviewOrganizationWide, documentAssetKeys, durableSessionDeadlines, hasReviewAccess, isOpaqueSessionToken, mergeSourceContentEdit, normalizeAvatarUrl, normalizeBotCommand, normalizedSourceMessages, organizationWideFromReview, retryWebexDraft, sourceContentFromEvidenceMap, sourceContentText, validateGeminiDraft, verifyWebhookSignature, webhookEventId } from "./index.js";
+import { adminSetupInvitationStatus, canAccessIntegrationSettings, defaultReviewOrganizationWide, documentAssetKeys, durableSessionDeadlines, hasReviewAccess, isOpaqueSessionToken, mergeSourceContentEdit, normalizeAvatarUrl, normalizeBotCommand, normalizedSourceMessages, organizationWideFromReview, retryWebexDraft, sourceContentFromEvidenceMap, sourceContentText, validateGeminiDraft, verifyInternalBearer, verifyWebhookSignature, webexAutomationRoute, webexOAuthScopes, webhookEventId } from "./index.js";
 import { LlmProviderError } from "../server/modules/llm/provider.js";
 
 describe("integration settings access", () => {
@@ -9,6 +9,26 @@ describe("integration settings access", () => {
     expect(canAccessIntegrationSettings(" NICKOLAS.GETTEL@TDSYNNEX.COM ")).toBe(true);
     expect(canAccessIntegrationSettings("admin@tdsynnex.com")).toBe(false);
     expect(canAccessIntegrationSettings(undefined)).toBe(false);
+  });
+});
+
+describe("portfolio deployment boundaries", () => {
+  it("requests only identity scopes when Webex capture is disabled", () => {
+    expect(webexOAuthScopes(false)).toBe("openid email profile spark:people_read");
+    expect(webexOAuthScopes(true)).toContain("spark:messages_read");
+  });
+
+  it("identifies Webex automation routes without blocking OAuth", () => {
+    expect(webexAutomationRoute("/api/webhooks/webex")).toBe(true);
+    expect(webexAutomationRoute("/api/admin/settings/rooms")).toBe(true);
+    expect(webexAutomationRoute("/api/auth/webex/start")).toBe(false);
+    expect(webexAutomationRoute("/api/knowledge-chat")).toBe(false);
+  });
+
+  it("protects the local scheduled-job trigger with a bearer secret", async () => {
+    expect(await verifyInternalBearer("Bearer scheduler-secret", "scheduler-secret")).toBe(true);
+    expect(await verifyInternalBearer("Bearer wrong", "scheduler-secret")).toBe(false);
+    expect(await verifyInternalBearer(null, "scheduler-secret")).toBe(false);
   });
 });
 

@@ -24,10 +24,10 @@ interface AuditEvent { id: string; action: string; target_type: string; occurred
 interface SettingsData {
   currentUserId: string; selectedTeamId: string; signInUrl: string; teams: Team[]; selectedTeam: Team;
   members: Member[]; availableUsers: Array<{ id: string; displayName: string; email: string; status: string }>; invitations: Invitation[]; adminSetupInvitations: AdminSetupInvitation[]; rooms: Room[]; directory: DirectoryTeam[];
-  grants: SpaceGrant[]; requests: AccessRequest[]; audit: AuditEvent[]; webexRoomsAvailable: boolean | null; roomsLoaded: boolean;
+  grants: SpaceGrant[]; requests: AccessRequest[]; audit: AuditEvent[]; webexRoomsAvailable: boolean | null; roomsLoaded: boolean; webexCaptureEnabled: boolean;
 }
 interface SettingsRoomsData { rooms: Room[]; webexRoomsAvailable: boolean; roomsLoaded: true }
-interface IntegrationSettings { integrations: Record<"webexOAuth" | "webexCapture" | "webhook" | "supabase" | "llm", boolean>; captureRoomCount: number; botName: string; redirectUri: string | null }
+interface IntegrationSettings { captureEnabled: boolean; integrations: Record<"webexOAuth" | "webexCapture" | "webhook" | "supabase" | "llm", boolean>; captureRoomCount: number; botName: string; redirectUri: string | null }
 
 const sections: Array<{ id: SettingsSection; label: string; icon: typeof Users }> = [
   { id: "profile", label: "Team profile", icon: Building2 },
@@ -56,9 +56,10 @@ function parseInvitees(value: string, role: "basic" | "moderator") {
 
 export function SettingsPage({ userEmail }: { userEmail: string }) {
   const [params, setParams] = useSearchParams();
-  const availableSections = canViewIntegrations(userEmail) ? sections : sections.filter(({ id }) => id !== "integrations");
-  const section = (availableSections.some(({ id }) => id === params.get("section")) ? params.get("section") : "profile") as SettingsSection;
   const [data, setData] = useState<SettingsData | null>(null);
+  const visibleSections = canViewIntegrations(userEmail) ? sections : sections.filter(({ id }) => id !== "integrations");
+  const availableSections = data?.webexCaptureEnabled === false ? visibleSections.filter(({ id }) => id !== "spaces") : visibleSections;
+  const section = (availableSections.some(({ id }) => id === params.get("section")) ? params.get("section") : "profile") as SettingsSection;
   const [loading, setLoading] = useState(true);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -95,13 +96,13 @@ export function SettingsPage({ userEmail }: { userEmail: string }) {
   }, [data, load, requestedTeamId]);
 
   useEffect(() => {
-    if (data && !data.roomsLoaded && (section === "spaces" || section === "sharing")) void loadRooms(data.selectedTeamId);
+    if (data?.webexCaptureEnabled && !data.roomsLoaded && (section === "spaces" || section === "sharing")) void loadRooms(data.selectedTeamId);
   }, [data, loadRooms, section]);
 
   const run = async (work: () => Promise<unknown>, success: string) => {
     setMessage(""); setError(false);
     try {
-      const refreshRooms = data?.roomsLoaded === true;
+      const refreshRooms = data?.webexCaptureEnabled === true && data.roomsLoaded === true;
       await work(); await load(selectedTeamId);
       if (refreshRooms) await loadRooms(selectedTeamId);
       setMessage(success);
@@ -118,13 +119,13 @@ export function SettingsPage({ userEmail }: { userEmail: string }) {
   return (
     <div className="page settings-page">
       <header className="page-heading settings-heading">
-        <div><span className="eyebrow">Team administration</span><h1>Settings</h1><p>Manage team membership, Webex spaces, shared knowledge, and access without exposing another team’s pending reviews.</p></div>
+        <div><span className="eyebrow">Team administration</span><h1>Settings</h1><p>{data.webexCaptureEnabled ? "Manage team membership, Webex spaces, shared knowledge, and access without exposing another team’s pending reviews." : "Manage portfolio access, team membership, and the archived knowledge library. Webex capture is disabled in this deployment."}</p></div>
         <label className="team-picker"><span>Administering</span><select value={selectedTeamId} onChange={(event) => chooseTeam(event.target.value)}>{data.teams.map((team) => <option key={team.id} value={team.id}>{team.name}{team.status === "archived" ? " (inactive)" : ""}</option>)}</select></label>
       </header>
       <div className="settings-layout">
         <nav className="settings-tabs" aria-label="Settings sections">{availableSections.map(({ id, label, icon: Icon }) => <button key={id} className={section === id ? "active" : ""} onClick={() => chooseSection(id)}><Icon size={17} />{label}</button>)}</nav>
         <section className="settings-content">
-          {data.roomsLoaded && !data.webexRoomsAvailable && <p className="settings-message error" role="status">Live Webex space discovery is temporarily unavailable. Team settings remain available, but no spaces are shown until Webex confirms the rooms containing the TDS bot.</p>}
+          {data.webexCaptureEnabled && data.roomsLoaded && !data.webexRoomsAvailable && <p className="settings-message error" role="status">Live Webex space discovery is temporarily unavailable. Team settings remain available, but no spaces are shown until Webex confirms the rooms containing the TDS bot.</p>}
           {message && <p className={`settings-message ${error ? "error" : "success"}`} role="status">{message}</p>}
           {section === "profile" && <TeamProfile data={data} run={run} reload={() => load(selectedTeamId)} ensureRooms={() => loadRooms(selectedTeamId)} roomsLoading={roomsLoading} />}
           {section === "members" && <MembersSettings data={data} run={run} />}
@@ -149,7 +150,7 @@ function TeamProfile({ data, run, reload, ensureRooms, roomsLoading }: { data: S
   const toggleCreating = () => {
     const opening = !creating;
     setCreating(opening);
-    if (opening && !data.roomsLoaded) void ensureRooms();
+    if (opening && data.webexCaptureEnabled && !data.roomsLoaded) void ensureRooms();
   };
   const issueAdminInvite = async (emailOverride?: string) => {
     setAdminInviteMessage("");
@@ -162,7 +163,7 @@ function TeamProfile({ data, run, reload, ensureRooms, roomsLoading }: { data: S
     } catch (error) { setAdminInviteMessage(error instanceof Error ? error.message : "The invitation could not be created."); }
   };
   return <div className="settings-stack"><article className="panel settings-card"><h2>Team profile</h2><p>Team names and status are visible in sharing and access-request directories.</p><label className="settings-field"><span>Team name</span><input value={name} onChange={(event) => setName(event.target.value)} /></label><div className="settings-actions"><button className="primary-button" disabled={!name.trim() || name.trim() === data.selectedTeam.name} onClick={() => void run(() => api(`/api/admin/teams/${data.selectedTeamId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, status: data.selectedTeam.status }) }), "Team profile updated.")}>Save name</button>{data.selectedTeam.status === "active" && <button className="danger-outline" onClick={() => { if (window.confirm(`Deactivate ${data.selectedTeam.name}? It will be hidden from new requests and its memberships will become inactive.`)) void api(`/api/admin/teams/${data.selectedTeamId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, status: "archived" }) }).then(() => window.location.assign("/")); }}>Deactivate team</button>}</div></article>
-    <article className="panel settings-card"><div className="settings-card-heading"><div><h2>Create another team</h2><p>You become its first Admin. The guided setup keeps membership and space routing explicit.</p></div><button className="secondary-button" onClick={toggleCreating}><Plus size={16} />{creating ? "Close" : "New team"}</button></div>{creating && <div className="mini-wizard"><label className="settings-field"><span>Team name</span><input value={newName} onChange={(event) => setNewName(event.target.value)} /></label><div className="two-column"><label className="settings-field"><span>Invite emails</span><textarea rows={3} value={newEmails} onChange={(event) => setNewEmails(event.target.value)} placeholder="Paste emails separated by commas or lines" /></label><label className="settings-field"><span>Initial invite role</span><select value={newRole} onChange={(event) => setNewRole(event.target.value as "basic" | "moderator")}><option value="basic">Basic User</option><option value="moderator">Moderator</option></select></label></div>{roomsLoading && !data.roomsLoaded ? <div className="inline-status"><LoaderCircle className="spin" size={16} />Loading Webex spaces…</div> : <div className="room-checklist">{data.rooms.map((room) => <label key={room.id}><input type="checkbox" checked={newRooms.includes(room.id)} onChange={() => toggleNewRoom(room.id)} />{room.title}</label>)}</div>}<button className="primary-button" disabled={!newName.trim() || roomsLoading} onClick={() => void run(() => api("/api/admin/teams", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: newName, invitations: parseInvitees(newEmails, newRole), roomIds: newRooms }) }), "New team created.")}>Create team</button></div>}</article>
+    <article className="panel settings-card"><div className="settings-card-heading"><div><h2>Create another team</h2><p>You become its first Admin. The guided setup keeps membership{data.webexCaptureEnabled ? " and space routing" : ""} explicit.</p></div><button className="secondary-button" onClick={toggleCreating}><Plus size={16} />{creating ? "Close" : "New team"}</button></div>{creating && <div className="mini-wizard"><label className="settings-field"><span>Team name</span><input value={newName} onChange={(event) => setNewName(event.target.value)} /></label><div className="two-column"><label className="settings-field"><span>Invite emails</span><textarea rows={3} value={newEmails} onChange={(event) => setNewEmails(event.target.value)} placeholder="Paste emails separated by commas or lines" /></label><label className="settings-field"><span>Initial invite role</span><select value={newRole} onChange={(event) => setNewRole(event.target.value as "basic" | "moderator")}><option value="basic">Basic User</option><option value="moderator">Moderator</option></select></label></div>{data.webexCaptureEnabled && (roomsLoading && !data.roomsLoaded ? <div className="inline-status"><LoaderCircle className="spin" size={16} />Loading Webex spaces…</div> : <div className="room-checklist">{data.rooms.map((room) => <label key={room.id}><input type="checkbox" checked={newRooms.includes(room.id)} onChange={() => toggleNewRoom(room.id)} />{room.title}</label>)}</div>)}<button className="primary-button" disabled={!newName.trim() || roomsLoading} onClick={() => void run(() => api("/api/admin/teams", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: newName, invitations: parseInvitees(newEmails, newRole), roomIds: newRooms }) }), "New team created.")}>Create team</button></div>}</article>
     <article className="panel settings-card"><h2>Invite a new Team Admin</h2><p>Create a single-use, email-bound link that allows its recipient to create one team and become that team’s first Admin. Moderators cannot create or manage these invitations.</p><div className="settings-actions admin-invite-actions"><label className="settings-field admin-invite-email"><span>Future Admin email</span><input type="email" value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} placeholder="name@tdsynnex.com" /></label><button className="primary-button" disabled={!adminEmail.trim()} onClick={() => void issueAdminInvite()}>Create and copy link</button></div>{adminInviteLink && <label className="settings-field"><span>New setup link</span><input readOnly value={adminInviteLink} onFocus={(event) => event.currentTarget.select()} /></label>}{adminInviteMessage && <p className="settings-message">{adminInviteMessage}</p>}<div className="settings-list"><h3>Admin setup invitations</h3>{data.adminSetupInvitations.length === 0 && <p className="settings-empty">No Admin setup invitations yet.</p>}{data.adminSetupInvitations.map((invite) => <div className="settings-row" key={invite.id}><div><strong>{invite.email}</strong><span>{invite.status.replaceAll("_", " ")} · expires {new Date(invite.expires_at).toLocaleDateString()}</span></div>{(invite.status === "pending" || invite.status === "setup_started") && <div className="settings-actions"><button className="secondary-button" onClick={() => { setAdminEmail(invite.email); void issueAdminInvite(invite.email); }}>Issue replacement</button><button className="text-danger" onClick={() => void run(() => api(`/api/admin/team-admin-invitations/${invite.id}`, { method: "DELETE" }), "Admin setup invitation revoked.")}>Revoke</button></div>}</div>)}</div></article>
   </div>;
 }
@@ -213,9 +214,9 @@ function IntegrationSettingsPanel() {
   const [settings, setSettings] = useState<IntegrationSettings | null>(null); const [message, setMessage] = useState("");
   const load = useCallback(() => { void api("/api/admin/integrations").then((value) => setSettings(value as IntegrationSettings)).catch((error: Error) => setMessage(error.message)); }, []);
   useEffect(load, [load]);
-  const cards = useMemo(() => settings ? [{ key: "webexOAuth", label: "Webex sign-in" }, { key: "webexCapture", label: "Capture identity" }, { key: "webhook", label: "Signed webhook" }, { key: "supabase", label: "Supabase" }, { key: "llm", label: "LLM processing" }] as const : [], [settings]);
+  const cards = useMemo(() => settings ? ([{ key: "webexOAuth", label: "Webex sign-in" }, ...(settings.captureEnabled ? [{ key: "webexCapture", label: "Capture identity" }, { key: "webhook", label: "Signed webhook" }] as const : []), { key: "supabase", label: "Supabase" }, { key: "llm", label: "LLM processing" }] as const) : [], [settings]);
   if (!settings) return <div className="inline-status panel"><LoaderCircle className="spin" size={18} />{message || "Checking integration status…"}</div>;
-  return <div className="settings-stack"><div className="integration-grid">{cards.map((card) => <article className="integration-card panel" key={card.key}><span className={settings.integrations[card.key] ? "integration-ready" : "integration-pending"}>{settings.integrations[card.key] ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}{settings.integrations[card.key] ? "Ready" : "Needs configuration"}</span><h2>{card.label}</h2>{card.key === "webexCapture" && <p>@{settings.botName} · {settings.captureRoomCount} approved spaces</p>}</article>)}</div><article className="panel settings-card"><h2>Webhook registration</h2><p>Any Team Admin may safely register the shared signed mention webhook. Secret values are never displayed.</p><button className="primary-button" disabled={!settings.integrations.webexCapture || !settings.integrations.llm} onClick={() => void api("/api/admin/webex/webhook", { method: "POST" }).then(() => { setMessage("Signed Webex webhook registered."); load(); }).catch((error: Error) => setMessage(error.message))}>{settings.integrations.webhook ? "Re-register webhook" : "Register webhook"}</button>{message && <p className="settings-message">{message}</p>}</article></div>;
+  return <div className="settings-stack"><div className="integration-grid">{cards.map((card) => <article className="integration-card panel" key={card.key}><span className={settings.integrations[card.key] ? "integration-ready" : "integration-pending"}>{settings.integrations[card.key] ? <CheckCircle2 size={16} /> : <CircleAlert size={16} />}{settings.integrations[card.key] ? "Ready" : "Needs configuration"}</span><h2>{card.label}</h2>{card.key === "webexCapture" && <p>@{settings.botName} · {settings.captureRoomCount} approved spaces</p>}</article>)}</div>{settings.captureEnabled ? <article className="panel settings-card"><h2>Webhook registration</h2><p>Any Team Admin may safely register the shared signed mention webhook. Secret values are never displayed.</p><button className="primary-button" disabled={!settings.integrations.webexCapture || !settings.integrations.llm} onClick={() => void api("/api/admin/webex/webhook", { method: "POST" }).then(() => { setMessage("Signed Webex webhook registered."); load(); }).catch((error: Error) => setMessage(error.message))}>{settings.integrations.webhook ? "Re-register webhook" : "Register webhook"}</button>{message && <p className="settings-message">{message}</p>}</article> : <article className="panel settings-card subtle-card"><ShieldCheck size={22} /><div><h2>Portfolio mode</h2><p>Webex is used only for sign-in. Message capture, room discovery, and webhook registration are disabled on this server.</p>{settings.redirectUri && <p>OAuth callback: <code>{settings.redirectUri}</code></p>}</div></article>}</div>;
 }
 
 function AuditSettings({ data }: { data: SettingsData }) {

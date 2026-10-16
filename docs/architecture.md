@@ -13,6 +13,32 @@ The scaffold uses these boundaries:
 - `server/routes`: thin HTTP transport handlers. Routes must authenticate, call a capability, and shape safe responses; they must not contain the authorization model.
 - `supabase/migrations`: PostgreSQL schema, indexes, and deny-by-default browser access.
 
+## Portfolio deployment profile
+
+`TDS_DEPLOYMENT_MODE=portfolio` is the self-hosted, read-oriented profile for
+the Debian portfolio server. It keeps Webex OAuth identity, revocable TDS
+sessions, the approved Q&A/SOP library, search, document views, and Knowledge
+Chat/RAG. It does not connect the web application to the replacement Microsoft
+automation pipeline.
+
+In this profile, all Webex message, room-discovery, capture, webhook, and
+webhook-registration routes fail closed with `404`. OAuth requests use only the
+identity/profile scopes, and the callback does not persist a capture identity.
+First-time team setup does not require a Webex room. The UI removes capture
+controls and labels the deployment as portfolio-only.
+
+The portfolio container runs the Worker locally through Wrangler and invokes a
+secret-protected scheduling endpoint over container loopback every five minutes
+so queued RAG index work continues without Cloudflare Cron Triggers. The public
+reverse proxy blocks `/api/internal/` in addition to the endpoint's bearer
+check. Supabase remains the authoritative data store. HTTPS is terminated by
+the Debian server's reverse proxy; the application container is reachable only
+on the shared Docker network.
+
+The default `product` profile preserves the historical bot-triggered workflow
+below. This separation keeps the portfolio migration reversible and avoids
+silently weakening the former product's capture/security rules.
+
 ## Security posture
 
 - Webex establishes identity; TDS owns account status and team-specific roles.

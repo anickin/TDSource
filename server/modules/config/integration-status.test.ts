@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { embeddingBaseUrl, embeddingConfigured, embeddingKey, embeddingModel, embeddingProvider, integrationStatus } from "./integration-status.js";
+import { deploymentMode, embeddingBaseUrl, embeddingConfigured, embeddingKey, embeddingModel, embeddingProvider, integrationStatus, webexCaptureEnabled } from "./integration-status.js";
 
 const configured = {
   WEBEX_CLIENT_ID: "client",
@@ -46,5 +46,17 @@ describe("integrationStatus", () => {
     expect(embeddingModel(env)).toBe("nomic-embed-text");
     expect(embeddingBaseUrl(env)).toBe("http://host:11434");
     expect(embeddingConfigured(env)).toBe(true);
+  });
+
+  it("uses portfolio mode to keep OAuth while disabling Webex capture", () => {
+    const env = { ...configured, TDS_DEPLOYMENT_MODE: " portfolio ", WEBEX_BOT_ACCESS_TOKEN: "bot", WEBEX_BOT_NAME: "TDS", WEBEX_WEBHOOK_SECRET: "webhook" };
+    expect(deploymentMode(env)).toBe("portfolio");
+    expect(webexCaptureEnabled(env)).toBe(false);
+    expect(integrationStatus(env)).toMatchObject({ deploymentMode: "portfolio", webexCaptureEnabled: false, webexOAuthConfigured: true, webexBotConfigured: false });
+  });
+
+  it("preserves product capture behavior by default", () => {
+    expect(deploymentMode(configured)).toBe("product");
+    expect(webexCaptureEnabled(configured)).toBe(true);
   });
 });
