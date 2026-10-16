@@ -1051,17 +1051,31 @@ function evidenceToProviderIds(draft: GeneratedDraft, messages: Array<Record<str
   return { problem: ids(draft.evidence.problem), summary: ids(draft.evidence.summary), steps: draft.evidence.steps.map(ids), warnings: draft.evidence.warnings.map(ids) };
 }
 
-function isSameOrigin(request: Request, env: Env): boolean {
+export function isSameOrigin(request: Request, env: Env): boolean {
   const origin = request.headers.get("origin");
   const expected = appOrigin(request, env);
-  if (!origin) return false;
   if (origin === expected) return true;
   // Local development commonly switches between localhost and 127.0.0.1.
   // Keep production origin checks exact while accepting those equivalent loopback aliases.
   try {
-    const actualUrl = new URL(origin);
+    const actualUrl = new URL(origin || "");
     const expectedUrl = new URL(expected);
-    return localOrigin(origin) && localOrigin(expected) && actualUrl.protocol === expectedUrl.protocol && actualUrl.port === expectedUrl.port;
+    if (localOrigin(origin || "") && localOrigin(expected) && actualUrl.protocol === expectedUrl.protocol && actualUrl.port === expectedUrl.port) return true;
+  } catch {
+    // A reverse proxy can omit or normalize Origin; validate its public target below.
+  }
+
+  // Browsers prevent scripts from forging Sec-Fetch-Site. This preserves the
+  // CSRF boundary when a trusted reverse proxy changes the Origin header while
+  // still requiring the request to target the configured public application.
+  if (request.headers.get("sec-fetch-site")?.toLowerCase() !== "same-origin") return false;
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim()
+    || request.headers.get("x-forwarded-scheme")?.split(",", 1)[0]?.trim();
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",", 1)[0]?.trim()
+    || request.headers.get("host")?.trim();
+  if (!forwardedProtocol || !forwardedHost) return false;
+  try {
+    return new URL(`${forwardedProtocol}://${forwardedHost}`).origin === expected;
   } catch {
     return false;
   }

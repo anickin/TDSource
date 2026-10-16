@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildKnowledgeContext, rankKnowledge } from "../server/modules/knowledge/chat.js";
-import { adminSetupInvitationStatus, canAccessIntegrationSettings, defaultReviewOrganizationWide, documentAssetKeys, durableSessionDeadlines, hasReviewAccess, isOpaqueSessionToken, mergeSourceContentEdit, normalizeAvatarUrl, normalizeBotCommand, normalizedSourceMessages, organizationWideFromReview, retryWebexDraft, sourceContentFromEvidenceMap, sourceContentText, validateGeminiDraft, verifyInternalBearer, verifyWebhookSignature, webexAutomationRoute, webexOAuthScopes, webhookEventId } from "./index.js";
+import { adminSetupInvitationStatus, canAccessIntegrationSettings, defaultReviewOrganizationWide, documentAssetKeys, durableSessionDeadlines, hasReviewAccess, isOpaqueSessionToken, isSameOrigin, mergeSourceContentEdit, normalizeAvatarUrl, normalizeBotCommand, normalizedSourceMessages, organizationWideFromReview, retryWebexDraft, sourceContentFromEvidenceMap, sourceContentText, validateGeminiDraft, verifyInternalBearer, verifyWebhookSignature, webexAutomationRoute, webexOAuthScopes, webhookEventId } from "./index.js";
 import { LlmProviderError } from "../server/modules/llm/provider.js";
 
 describe("integration settings access", () => {
@@ -29,6 +29,35 @@ describe("portfolio deployment boundaries", () => {
     expect(await verifyInternalBearer("Bearer scheduler-secret", "scheduler-secret")).toBe(true);
     expect(await verifyInternalBearer("Bearer wrong", "scheduler-secret")).toBe(false);
     expect(await verifyInternalBearer(null, "scheduler-secret")).toBe(false);
+  });
+});
+
+describe("same-origin mutation protection", () => {
+  const env = { APP_ORIGIN: "https://tdsource.example" };
+
+  it("accepts the configured browser origin", () => {
+    const request = new Request("http://127.0.0.1:8787/api/knowledge-chat", { headers: { origin: env.APP_ORIGIN } });
+    expect(isSameOrigin(request, env)).toBe(true);
+  });
+
+  it("accepts a same-origin browser request through the configured reverse proxy", () => {
+    const request = new Request("http://127.0.0.1:8787/api/knowledge-chat", { headers: {
+      origin: "http://127.0.0.1:8787",
+      host: "tdsource.example",
+      "sec-fetch-site": "same-origin",
+      "x-forwarded-proto": "https",
+    } });
+    expect(isSameOrigin(request, env)).toBe(true);
+  });
+
+  it("rejects cross-site requests even when they target the public proxy", () => {
+    const request = new Request("http://127.0.0.1:8787/api/knowledge-chat", { headers: {
+      origin: "https://attacker.example",
+      host: "tdsource.example",
+      "sec-fetch-site": "cross-site",
+      "x-forwarded-proto": "https",
+    } });
+    expect(isSameOrigin(request, env)).toBe(false);
   });
 });
 
