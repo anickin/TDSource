@@ -22,8 +22,14 @@ ENV PATH=$PNPM_HOME:$PATH
 ENV NODE_ENV=production
 ENV CLOUDFLARE_INCLUDE_PROCESS_ENV=true
 ENV WRANGLER_SEND_METRICS=false
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
-RUN corepack enable && corepack prepare pnpm@11.19.0 --activate
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable \
+  && corepack prepare pnpm@11.19.0 --activate
 
 WORKDIR /app
 
